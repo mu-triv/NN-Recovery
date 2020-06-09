@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 import struct
-from batina.utils import *
+from pybatina.utils import *
 
 import numpy as np
 import pandas as pd
@@ -11,7 +11,8 @@ max_mantissa_nbits = 23
 
 def build_guess_values(component='mantissa', numbers=None, mantissa_nbits=10, guess_range=None):
     """
-    build the list of guess values which is used to evaluate the weight value
+    Build the list of guess values which is used to evaluate the weight value.
+    This function should be used internally.
     :param component: IEEE 754 component name, it must be "mentissa", "exponent", "sign"
     :param numbers: the list of numbers of the previous state
     :param mantissa_nbits: number of mantissa bits to be recovered
@@ -50,7 +51,9 @@ def build_guess_values(component='mantissa', numbers=None, mantissa_nbits=10, gu
 
 def build_input_values(component='mantissa',  mantissa_nbits=10):
     """
-    build the list of input values which is used to evaluate the weight value
+    build the list of input values which is used to evaluate the weight value. The user needs
+    to get this input values for attacking the targeted neuron weight. The weight attack needs
+    three steps: recover mantissa, recover exponent and then recover sign.
     :param component: IEEE 754 component name, it must be "mentissa", "exponent", "sign"
     :param mantissa_nbits: number of mantissa bits to be recovered
     :return: the list of input numbers
@@ -71,6 +74,7 @@ def compute_corr_numbers(weight_hw, known_inputs, guess_numbers):
     """
     compute the HW correlations of the weight_hw and the HW of the results of the multiplication
     between known_inputs and guess_numbers.
+    This function should be used internally.
     :param weight_hw: hamming weight of the known_inputs with the secret value
     :param known_inputs: known input values
     :param guess_numbers: guess numbers
@@ -87,7 +91,7 @@ def recover_weight(secret_hamming_weight_set,
                    mantissa_nbits=10,
                    max_number_of_best_candidates=10):
     """
-    recover the weight value
+    recover the weight value.
     :param secret_hamming_weight_set: a tuple of 3 hamming weights: hamming weights of mantissa, hamming weights of exponent and hamming weights of sign
     :param input_value_set: a tuple of 3 input values: input values of mantissa, input values of exponent and input values of sign
     :param guess_range: the guess range which is used to reduce the search space

@@ -2,8 +2,8 @@ import sys
 
 sys.path.append("../")
 
-from batina.weight_recovery import *
-from batina.utils import *
+from pybatina.weight_recovery import *
+from pybatina.utils import *
 import numpy as np
 
 
