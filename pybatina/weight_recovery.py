@@ -62,9 +62,10 @@ def build_input_values(component='mantissa',  mantissa_nbits=10):
         retval = np.vectorize(int_to_float)(
             np.left_shift(np.arange(0, 2 << mantissa_nbits), max_mantissa_nbits - mantissa_nbits))
     elif component == 'exponent':
-        retval = np.vectorize(int_to_float)(np.left_shift(np.arange(0, 2 << 8), max_mantissa_nbits))
+        retval = np.vectorize(int_to_float)(np.left_shift(np.arange(0, 1 << 8), max_mantissa_nbits))
     elif component == 'sign':
-        retval = np.random.uniform(-1.0, 1.0, 1000)
+        pos_nums = np.vectorize(int_to_float)(np.left_shift(np.arange(0, 1 << 8), max_mantissa_nbits))
+        retval = np.concatenate((pos_nums, -pos_nums))
     else:
         raise ValueError('the component is not supported')
     return retval
