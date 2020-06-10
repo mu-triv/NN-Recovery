@@ -60,7 +60,10 @@ def build_input_values(component='mantissa',  mantissa_nbits=10):
     """
     if component == 'mantissa':
         retval = np.vectorize(int_to_float)(
-            np.left_shift(np.arange(0, 1 << mantissa_nbits), max_mantissa_nbits - mantissa_nbits))
+            np.left_shift(np.arange(0, 1 << mantissa_nbits), max_mantissa_nbits - mantissa_nbits)
+            # add 0 to the exponent component
+            | np.left_shift(127, max_mantissa_nbits)
+        )
     elif component == 'exponent':
         retval = np.vectorize(int_to_float)(np.left_shift(np.arange(0, 1 << 8), max_mantissa_nbits))
     elif component == 'sign':
