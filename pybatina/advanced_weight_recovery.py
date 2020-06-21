@@ -44,15 +44,15 @@ class AdvancedWeightRecovery:
             # this defines the number of mantissa bits of input values which are for generating HW
             n_msbbits = AdvancedWeightRecovery.MANTISSA_THREE_BYTES[mantissa_byte_index]
             m = np.left_shift(np.arange(0, 1 << n_msbbits), AdvancedWeightRecovery.MAX_MANTISSA_NBITS - n_msbbits)
-            e0 = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
-            s = 1 << 31
-            ivals = np.concatenate((m | e0, m | e0 | s))
+            e = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
+            ivals = m | e
         elif component == 'exponent':
             ivals = np.left_shift(np.arange(0, 1 << 8), AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
         else:
             raise ValueError('the component is not supported')
 
-        return np.vectorize(int_to_float)(ivals).astype(np.float32)
+        fvals = np.vectorize(int_to_float)(ivals).astype(np.float32)
+        return np.concatenate((fvals, -fvals))
 
     @staticmethod
     def build_values(component, mantissa_byte_index):
@@ -106,8 +106,7 @@ class AdvancedWeightRecovery:
 
     def recover_weight(self, secret_hamming_weight_set):
         if len(secret_hamming_weight_set) != len(self.input_value_set):
-            raise ValueError('size of secret_hamming_weight_set does not match size of input_value_set (%d, %d)' % (
-            len(secret_hamming_weight_set), len(self.input_value_set)))
+            raise ValueError('size of secret_hamming_weight_set does not match size of input_value_set (%d, %d)' % (len(secret_hamming_weight_set), len(self.input_value_set)))
 
         set_idx = 0
 
@@ -132,6 +131,4 @@ class AdvancedWeightRecovery:
         if len(secret_hw) != len(known_inputs):
             raise ValueError('#%d: size of secret_hw does not match size of known_inputs (%d, %d)' % (set_idx, len(secret_hw), len(known_inputs)))
         exponent_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs, guess_numbers).sort_values(ascending=False).iloc[:self.number_of_best_candidates]
-        set_idx = set_idx + 1
-
-        return exponent_corr.sort_values(ascending=False).iloc[:self.number_of_best_candidates]
+        return exponent_corr
