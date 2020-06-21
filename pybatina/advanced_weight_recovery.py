@@ -5,7 +5,7 @@ import pandas as pd
 
 
 class AdvancedWeightRecovery:
-    MANTISSA_THREE_BYTES = [7, 8, 8]
+    MANTISSA_THREE_BYTES = [11, 8, 4]
     MAX_MANTISSA_NBITS = np.sum(MANTISSA_THREE_BYTES)
     NUMBER_OF_BEST_CANDIDATES = 10
 
@@ -42,13 +42,11 @@ class AdvancedWeightRecovery:
     def build_input_values(component, mantissa_byte_index=0):
         if component == 'mantissa':
             # this defines the number of mantissa bits of input values which are for generating HW
-            n_msbbits = 8
-            assert(AdvancedWeightRecovery.MAX_MANTISSA_NBITS >= n_msbbits)
-            m = np.left_shift(np.arange(0, 1 << n_msbbits),
-                              AdvancedWeightRecovery.MAX_MANTISSA_NBITS - n_msbbits - (1 << (len(AdvancedWeightRecovery.MANTISSA_THREE_BYTES) - mantissa_byte_index - 1)))
-            e = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
+            n_msbbits = AdvancedWeightRecovery.MANTISSA_THREE_BYTES[mantissa_byte_index]
+            m = np.left_shift(np.arange(0, 1 << n_msbbits), AdvancedWeightRecovery.MAX_MANTISSA_NBITS - n_msbbits)
+            e0 = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
             s = 1 << 31
-            ivals = np.concatenate((m | e, m | e | s))
+            ivals = np.concatenate((m | e0, m | e0 | s))
         elif component == 'exponent':
             ivals = np.left_shift(np.arange(0, 1 << 8), AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
         else:
@@ -73,7 +71,7 @@ class AdvancedWeightRecovery:
 
     @staticmethod
     def build_input_value_set():
-        input_value_set = [AdvancedWeightRecovery.build_input_values('mantissa', i) for i in range(3)]
+        input_value_set = [AdvancedWeightRecovery.build_input_values('mantissa', i) for i in range(len(AdvancedWeightRecovery.MANTISSA_THREE_BYTES))]
         input_value_set.append(AdvancedWeightRecovery.build_input_values('exponent'))
         return input_value_set
 
@@ -113,9 +111,9 @@ class AdvancedWeightRecovery:
 
         set_idx = 0
 
-        # step 1: recover mantissa
+        # step 1: recover mantissa and sign
         numbers = None
-        for mantissa_byte_index in [0, 1, 2]:
+        for mantissa_byte_index in range(len(AdvancedWeightRecovery.MANTISSA_THREE_BYTES)):
             guess_numbers = AdvancedWeightRecovery.build_guess_values(component='mantissa',
                                                                       mantissa_byte_index=mantissa_byte_index,
                                                                       numbers=numbers)
@@ -128,7 +126,7 @@ class AdvancedWeightRecovery:
             set_idx = set_idx + 1
 
         # step 2: recover exponent
-        guess_numbers = AdvancedWeightRecovery.build_guess_values(component='exponent')
+        guess_numbers = AdvancedWeightRecovery.build_guess_values(component='exponent', numbers=numbers)
         known_inputs = self.input_value_set[set_idx]
         secret_hw = secret_hamming_weight_set[set_idx]
         if len(secret_hw) != len(known_inputs):
@@ -136,13 +134,4 @@ class AdvancedWeightRecovery:
         exponent_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs, guess_numbers).sort_values(ascending=False).iloc[:self.number_of_best_candidates]
         set_idx = set_idx + 1
 
-        # step 3: combine exponent and mantissa
-        int_mantissa = np.vectorize(lambda x: float_to_int(x) & (~(0xff << AdvancedWeightRecovery.MAX_MANTISSA_NBITS)))(mantissa_corr.index)
-        int_exponent = np.vectorize(float_to_int)(exponent_corr.index)
-
-        index = np.vectorize(int_to_float)((int_mantissa | int_exponent[:, np.newaxis]).reshape(-1))
-        data = (mantissa_corr.values + exponent_corr.values[:, np.newaxis]).reshape(-1)
-
-        integrated_corr = pd.Series(index=np.concatenate((index, -index)), data=np.concatenate((data, data)))
-        integrated_corr = integrated_corr.iloc[(integrated_corr.index >= self.guess_range[0]) & (integrated_corr.index <= self.guess_range[1])]
-        return integrated_corr.sort_values(ascending=False).iloc[:self.number_of_best_candidates]
+        return exponent_corr.sort_values(ascending=False).iloc[:self.number_of_best_candidates]
