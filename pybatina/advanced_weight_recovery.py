@@ -42,9 +42,10 @@ class AdvancedWeightRecovery:
     def build_input_values(component, mantissa_byte_index=0):
         if component == 'mantissa':
             # this defines the number of mantissa bits of input values which are for generating HW
-            n_msbbits = AdvancedWeightRecovery.MANTISSA_THREE_BYTES[mantissa_byte_index]
+            # n_msbbits = max(AdvancedWeightRecovery.MANTISSA_THREE_BYTES[mantissa_byte_index], 8)
+            n_msbbits = 10
             m = np.left_shift(np.arange(0, 1 << n_msbbits), AdvancedWeightRecovery.MAX_MANTISSA_NBITS - n_msbbits)
-            e = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
+            e = 128 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
             ivals = m | e
         elif component == 'exponent':
             ivals = np.left_shift(np.arange(0, 1 << 8), AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
