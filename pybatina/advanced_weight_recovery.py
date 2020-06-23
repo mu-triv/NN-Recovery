@@ -5,9 +5,9 @@ import pandas as pd
 
 
 class AdvancedWeightRecovery:
-    MANTISSA_THREE_BYTES = [11, 8, 4]
+    MANTISSA_THREE_BYTES = [10, 8, 5]
     MAX_MANTISSA_NBITS = np.sum(MANTISSA_THREE_BYTES)
-    NUMBER_OF_BEST_CANDIDATES = 10
+    NUMBER_OF_BEST_CANDIDATES = 30
 
     def __init__(self, guess_range, number_of_best_candidates=NUMBER_OF_BEST_CANDIDATES):
         self.guess_range = guess_range
@@ -76,7 +76,7 @@ class AdvancedWeightRecovery:
             # this defines the number of mantissa bits of input values which are for generating HW
             n_msbbits = 10
             m = np.left_shift(np.arange(0, 1 << n_msbbits), AdvancedWeightRecovery.MAX_MANTISSA_NBITS - n_msbbits)
-            e = 128 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
+            e = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
             ivals = m | e
         elif component == 'exponent':
             ivals = np.left_shift(np.arange(0, 1 << 8), AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
@@ -100,7 +100,7 @@ class AdvancedWeightRecovery:
             m = np.left_shift(np.arange(0, 1 << AdvancedWeightRecovery.MANTISSA_THREE_BYTES[mantissa_byte_index]), AdvancedWeightRecovery.MAX_MANTISSA_NBITS - sum_nbits)
             e = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
             s = 1 << 31
-            retval = np.concatenate((m | e | s, m | e))
+            retval = m | e
         elif component == 'exponent':
             retval = np.left_shift(np.arange(0, 1 << 8), AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
         else:
@@ -130,7 +130,7 @@ class AdvancedWeightRecovery:
             if component == 'mantissa':
                 int_numbers = np.vectorize(float_to_int)(numbers)
             elif component == 'exponent':
-                mask = ~(0xff << AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
+                mask = (0xff << AdvancedWeightRecovery.MAX_MANTISSA_NBITS) ^ 0xffffffff
                 int_numbers = np.vectorize(lambda x: float_to_int(x) & mask)(numbers)
             else:
                 raise ValueError('the component is not supported')
@@ -153,33 +153,61 @@ class AdvancedWeightRecovery:
         return hw.corrwith(pd.Series(secret_hw), method='pearson')
 
     def recover_weight(self, secret_hamming_weight_set):
+        # sanity check
         if len(secret_hamming_weight_set) != len(self.input_value_set):
             raise ValueError('size of secret_hamming_weight_set does not match size of input_value_set (%d, %d)' % (len(secret_hamming_weight_set), len(self.input_value_set)))
 
         set_idx = 0
-
-        # step 1: recover mantissa and sign
+        # step 1: recover mantissa
         numbers = None
+        known_inputs = self.input_value_set[set_idx]
+        secret_hw = secret_hamming_weight_set[set_idx]
+        # sanity check
+        if len(secret_hw) != len(known_inputs):
+            raise ValueError('#%d: size of secret_hw does not match size of known_inputs (%d, %d)' % (set_idx, len(secret_hw), len(known_inputs)))
+
         for mantissa_byte_index in range(len(AdvancedWeightRecovery.MANTISSA_THREE_BYTES)):
-            guess_numbers = AdvancedWeightRecovery.build_guess_values(component='mantissa',
-                                                                      mantissa_byte_index=mantissa_byte_index,
-                                                                      numbers=numbers)
-            known_inputs = self.input_value_set[set_idx]
-            secret_hw = secret_hamming_weight_set[set_idx]
-            if len(secret_hw) != len(known_inputs):
-                raise ValueError('#%d: size of secret_hw does not match size of known_inputs (%d, %d)' % (set_idx, len(secret_hw), len(known_inputs)))
-            mantissa_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs,guess_numbers).sort_values(ascending=False).iloc[:self.number_of_best_candidates]
-            numbers = mantissa_corr.index
+            if numbers is None:
+                guess_numbers = AdvancedWeightRecovery.build_guess_values(component='mantissa',
+                                                                          mantissa_byte_index=mantissa_byte_index,
+                                                                          numbers=numbers)
+                mantissa_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs,guess_numbers)
+            else:
+                mantissa_corr = pd.Series()
+                for number in numbers:
+                    guess_numbers = AdvancedWeightRecovery.build_guess_values(component='mantissa',
+                                                                              mantissa_byte_index=mantissa_byte_index,
+                                                                              numbers=np.asarray([number]))
+                    # compute correlations of the guess values which are generated from the number
+                    corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs, guess_numbers).sort_values(ascending=False)
+                    # only keep the best values (we can keep more, but is this needed)
+                    mantissa_corr = pd.concat([mantissa_corr, corr.iloc[:4]])
+
+            # get the best values
+            numbers = mantissa_corr.sort_values(ascending=False).index[:self.number_of_best_candidates]
             #
             # Note: discovery of mantissa bits only uses one hamming weight trace
+        # step 2: determine sign
+        positive_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw=secret_hw, known_inputs=known_inputs, guess_numbers=np.asarray(numbers))
+        negative_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw=secret_hw, known_inputs=known_inputs, guess_numbers=np.asarray(-numbers))
+        if positive_corr.sum() < negative_corr.sum():
+            numbers = -numbers
+
         set_idx = set_idx + 1
 
-        # step 2: recover exponent
+        # step 3: recover exponent
         guess_numbers = AdvancedWeightRecovery.build_guess_values(component='exponent', numbers=numbers)
         guess_numbers = guess_numbers[np.where(np.logical_and(guess_numbers >= self.guess_range[0], guess_numbers <= self.guess_range[1]))]
         known_inputs = self.input_value_set[set_idx]
         secret_hw = secret_hamming_weight_set[set_idx]
+        # sanity check
         if len(secret_hw) != len(known_inputs):
             raise ValueError('#%d: size of secret_hw does not match size of known_inputs (%d, %d)' % (set_idx, len(secret_hw), len(known_inputs)))
         exponent_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs, guess_numbers).sort_values(ascending=False).iloc[:self.number_of_best_candidates]
-        return exponent_corr
+
+        # step 4: last sorting
+        set_idx = 0
+        known_inputs = self.input_value_set[set_idx]
+        secret_hw = secret_hamming_weight_set[set_idx]
+        full_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs, np.asarray(exponent_corr.index)).sort_values(ascending=False).iloc[:self.number_of_best_candidates]
+        return full_corr
