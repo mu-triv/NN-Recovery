@@ -153,6 +153,7 @@ class AdvancedWeightRecovery:
         return hw.corrwith(pd.Series(secret_hw), method='pearson')
 
     def recover_weight(self, secret_hamming_weight_set):
+        number_of_subcorr = 3
         # sanity check
         if len(secret_hamming_weight_set) != len(self.input_value_set):
             raise ValueError('size of secret_hamming_weight_set does not match size of input_value_set (%d, %d)' % (len(secret_hamming_weight_set), len(self.input_value_set)))
@@ -181,7 +182,7 @@ class AdvancedWeightRecovery:
                     # compute correlations of the guess values which are generated from the number
                     corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs, guess_numbers).sort_values(ascending=False)
                     # only keep the best values (we can keep more, but is this needed)
-                    mantissa_corr = pd.concat([mantissa_corr, corr.iloc[:2]])
+                    mantissa_corr = pd.concat([mantissa_corr, corr.iloc[:number_of_subcorr]])
 
             # get the best values
             numbers = np.asarray(mantissa_corr.sort_values(ascending=False).index[:self.number_of_best_candidates])
@@ -206,12 +207,17 @@ class AdvancedWeightRecovery:
             guess_numbers = AdvancedWeightRecovery.build_guess_values(component='exponent', numbers=np.asarray([number]))
             guess_numbers = guess_numbers[np.where(np.logical_and(guess_numbers >= self.guess_range[0], guess_numbers <= self.guess_range[1]))]
             corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs, guess_numbers).sort_values(ascending=False).iloc[:self.number_of_best_candidates]
-            exponent_corr = pd.concat([exponent_corr, corr.iloc[:2]])
+            exponent_corr = pd.concat([exponent_corr, corr.iloc[:number_of_subcorr]])
         # get the best values
         numbers = np.asarray(exponent_corr.sort_values(ascending=False).index[:self.number_of_best_candidates])
 
         # step 4: last sorting
-        known_inputs = np.concatenate(self.input_value_set)
-        secret_hw = np.concatenate(secret_hamming_weight_set)
-        full_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hw, known_inputs, numbers).sort_values(ascending=False).iloc[:self.number_of_best_candidates]
-        return full_corr
+        full_corr = AdvancedWeightRecovery.compute_corr_numbers(np.concatenate(secret_hamming_weight_set), np.concatenate(self.input_value_set), numbers)
+        idx0_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hamming_weight_set[0], self.input_value_set[0], numbers)
+
+        if full_corr.max() > idx0_corr.max():
+            last_corr = full_corr
+        else:
+            last_corr = idx0_corr
+
+        return last_corr.sort_values(ascending=False)
