@@ -5,7 +5,7 @@ import pandas as pd
 
 
 class AdvancedWeightRecovery:
-    MANTISSA_THREE_BYTES = [10, 8, 5]
+    MANTISSA_THREE_BYTES = [7, 8, 8]
     MAX_MANTISSA_NBITS = np.sum(MANTISSA_THREE_BYTES)
     NUMBER_OF_BEST_CANDIDATES = 30
 
@@ -87,6 +87,25 @@ class AdvancedWeightRecovery:
         return np.concatenate((fvals, -fvals))
 
     @staticmethod
+    def get_mask(component, mantissa_byte_index=None):
+        if component == 'mantissa':
+            try:
+                iter(mantissa_byte_index)
+                masks = [AdvancedWeightRecovery.get_mask(component, mantissa_byte_index=idx) for idx in mantissa_byte_index]
+                mask = 0
+                for m in masks:
+                    mask = mask | m
+            except TypeError:
+                nbits = sum(AdvancedWeightRecovery.MANTISSA_THREE_BYTES[:mantissa_byte_index + 1])
+                mask = ((1 << AdvancedWeightRecovery.MANTISSA_THREE_BYTES[mantissa_byte_index]) - 1) << (
+                            AdvancedWeightRecovery.MAX_MANTISSA_NBITS - nbits)
+        elif component == 'exponent':
+            mask = (0xff << AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
+        elif component == 'sign':
+            mask = (1 << 31)
+        return mask
+
+    @staticmethod
     def build_values(component, mantissa_byte_index):
         """
         build the guess values for recovering the IEEE-754 floating point components
@@ -99,7 +118,6 @@ class AdvancedWeightRecovery:
             sum_nbits = np.sum(AdvancedWeightRecovery.MANTISSA_THREE_BYTES[:mantissa_byte_index + 1])
             m = np.left_shift(np.arange(0, 1 << AdvancedWeightRecovery.MANTISSA_THREE_BYTES[mantissa_byte_index]), AdvancedWeightRecovery.MAX_MANTISSA_NBITS - sum_nbits)
             e = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
-            s = 1 << 31
             retval = m | e
         elif component == 'exponent':
             retval = np.left_shift(np.arange(0, 1 << 8), AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
@@ -117,6 +135,17 @@ class AdvancedWeightRecovery:
         return [AdvancedWeightRecovery.build_input_values('mantissa'), AdvancedWeightRecovery.build_input_values('exponent')]
 
     @staticmethod
+    def build_float(component, int_number):
+        if component == 'mantissa':
+            e = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
+            retval = int_number | e
+        elif component == 'exponent':
+            retval = int_number
+        else:
+            raise ValueError('the component is not supported')
+        return int_to_float(retval)
+
+    @staticmethod
     def build_guess_values(component, mantissa_byte_index=None, numbers=None):
         """
         build the guess values for recovering the IEEE-754 floating point components
@@ -130,7 +159,7 @@ class AdvancedWeightRecovery:
             if component == 'mantissa':
                 int_numbers = np.vectorize(float_to_int)(numbers)
             elif component == 'exponent':
-                mask = (0xff << AdvancedWeightRecovery.MAX_MANTISSA_NBITS) ^ 0xffffffff
+                mask = AdvancedWeightRecovery.get_mask(component) ^ 0xffffffff
                 int_numbers = np.vectorize(lambda x: float_to_int(x) & mask)(numbers)
             else:
                 raise ValueError('the component is not supported')
@@ -215,7 +244,7 @@ class AdvancedWeightRecovery:
         full_corr = AdvancedWeightRecovery.compute_corr_numbers(np.concatenate(secret_hamming_weight_set), np.concatenate(self.input_value_set), numbers)
         idx0_corr = AdvancedWeightRecovery.compute_corr_numbers(secret_hamming_weight_set[0], self.input_value_set[0], numbers)
 
-        if full_corr.max() > idx0_corr.max():
+        if full_corr.max() >= idx0_corr.max():
             last_corr = full_corr
         else:
             last_corr = idx0_corr
