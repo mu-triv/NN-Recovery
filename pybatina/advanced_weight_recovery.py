@@ -6,8 +6,10 @@ import pandas as pd
 
 class AdvancedWeightRecovery:
     MANTISSA_THREE_BYTES = [7, 8, 8]
-    MAX_MANTISSA_NBITS = np.sum(MANTISSA_THREE_BYTES)
+    MAX_MANTISSA_NBITS = sum(MANTISSA_THREE_BYTES)
     NUMBER_OF_BEST_CANDIDATES = 30
+    CORRELATION_STR = 'correlation'
+    GUESS_VALUE_STR = 'guess_value'
 
     def __init__(self, guess_range, number_of_best_candidates=NUMBER_OF_BEST_CANDIDATES):
         self.guess_range = guess_range
@@ -75,7 +77,7 @@ class AdvancedWeightRecovery:
         if component == 'mantissa':
             # this defines the number of mantissa bits of input values which are for generating HW
             n_msbbits = 10
-            m = np.left_shift(np.arange(0, 1 << n_msbbits), AdvancedWeightRecovery.MAX_MANTISSA_NBITS - n_msbbits)
+            m = np.left_shift(np.arange(0, 1 << n_msbbits), AdvancedWeightRecovery.MAX_MANTISSA_NBITS - n_msbbits) | np.arange(0, 1 << n_msbbits)[::-1]
             e = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
             ivals = m | e
         elif component == 'exponent':
@@ -87,23 +89,50 @@ class AdvancedWeightRecovery:
         return np.concatenate((fvals, -fvals))
 
     @staticmethod
+    def build_input_value_set():
+        """
+        build a set of input values that are used for recovering the secret number. The input set will be multiplied
+        with the secret number to collect the hamming weight trace.
+        :return: a set of input values
+        """
+        return [AdvancedWeightRecovery.build_input_values('mantissa'), AdvancedWeightRecovery.build_input_values('exponent')]
+
+    @staticmethod
     def get_mask(component, mantissa_byte_index=None):
         if component == 'mantissa':
             try:
-                iter(mantissa_byte_index)
-                masks = [AdvancedWeightRecovery.get_mask(component, mantissa_byte_index=idx) for idx in mantissa_byte_index]
-                mask = 0
-                for m in masks:
-                    mask = mask | m
+                retval = 0
+                for idx in iter(mantissa_byte_index):
+                    retval = retval | AdvancedWeightRecovery.get_mask(component, idx)
             except TypeError:
                 nbits = sum(AdvancedWeightRecovery.MANTISSA_THREE_BYTES[:mantissa_byte_index + 1])
-                mask = ((1 << AdvancedWeightRecovery.MANTISSA_THREE_BYTES[mantissa_byte_index]) - 1) << (
+                retval = ((1 << AdvancedWeightRecovery.MANTISSA_THREE_BYTES[mantissa_byte_index]) - 1) << (
                             AdvancedWeightRecovery.MAX_MANTISSA_NBITS - nbits)
         elif component == 'exponent':
-            mask = (0xff << AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
+            retval = (0xff << AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
         elif component == 'sign':
-            mask = (1 << 31)
-        return mask
+            retval = (1 << 31)
+        return retval
+
+    @staticmethod
+    def group_candidates(correlations, component, mantissa_byte_index=0):
+        df = correlations.reset_index().rename(
+            columns={'index': AdvancedWeightRecovery.GUESS_VALUE_STR, 0: AdvancedWeightRecovery.CORRELATION_STR})
+
+        if component == 'mantissa':
+            if mantissa_byte_index == 0:
+                nbits = 5
+            else:
+                nbits = sum(AdvancedWeightRecovery.MANTISSA_THREE_BYTES[:mantissa_byte_index])
+            mask = ((1 << nbits) - 1) << (AdvancedWeightRecovery.MAX_MANTISSA_NBITS - nbits)
+        elif component == 'exponent':
+            mask = (0xff << AdvancedWeightRecovery.MAX_MANTISSA_NBITS)
+        else:
+            raise ValueError('the component is not supported')
+
+        group_str = 'group'
+        df[group_str] = np.vectorize(float_to_int)(df[AdvancedWeightRecovery.GUESS_VALUE_STR]) & mask
+        return df.groupby(group_str)
 
     @staticmethod
     def build_values(component, mantissa_byte_index):
@@ -124,26 +153,6 @@ class AdvancedWeightRecovery:
         else:
             raise ValueError('the component is not supported')
         return retval
-
-    @staticmethod
-    def build_input_value_set():
-        """
-        build a set of input values that are used for recovering the secret number. The input set will be multiplied
-        with the secret number to collect the hamming weight trace.
-        :return: a set of input values
-        """
-        return [AdvancedWeightRecovery.build_input_values('mantissa'), AdvancedWeightRecovery.build_input_values('exponent')]
-
-    @staticmethod
-    def build_float(component, int_number):
-        if component == 'mantissa':
-            e = 127 << AdvancedWeightRecovery.MAX_MANTISSA_NBITS
-            retval = int_number | e
-        elif component == 'exponent':
-            retval = int_number
-        else:
-            raise ValueError('the component is not supported')
-        return int_to_float(retval)
 
     @staticmethod
     def build_guess_values(component, mantissa_byte_index=None, numbers=None):
